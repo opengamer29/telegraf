@@ -3,8 +3,10 @@ package histogram
 import (
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/influxdata/telegraf"
+	telegrafConfig "github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/plugins/aggregators"
 )
 
@@ -22,13 +24,17 @@ const bucketNegInf = "-Inf"
 
 // HistogramAggregator is aggregator with histogram configs and particular histograms for defined metrics
 type HistogramAggregator struct {
-	Configs      []config `toml:"config"`
-	ResetBuckets bool     `toml:"reset"`
-	Cumulative   bool     `toml:"cumulative"`
+	Configs            []config                `toml:"config"`
+	ResetBuckets       bool                    `toml:"reset"`
+	Cumulative         bool                    `toml:"cumulative"`
+	ExpirationInterval telegrafConfig.Duration `toml:"expiration_interval"`
 
+	timeFun timeFunc
 	buckets bucketsByMetrics
 	cache   map[uint64]metricHistogramCollection
 }
+
+type timeFunc func() time.Time
 
 // config is the config, which contains name, field of metric and histogram buckets.
 type config struct {
@@ -51,6 +57,7 @@ type metricHistogramCollection struct {
 	histogramCollection map[string]counts
 	name                string
 	tags                map[string]string
+	lastUpdateTime      time.Time
 }
 
 // counts is the number of hits in the bucket
@@ -67,6 +74,7 @@ type groupedByCountFields struct {
 func NewHistogramAggregator() *HistogramAggregator {
 	h := &HistogramAggregator{
 		Cumulative: true,
+		timeFun:    time.Now,
 	}
 	h.buckets = make(bucketsByMetrics)
 	h.resetCache()
@@ -89,6 +97,11 @@ var sampleConfig = `
   ## Whether bucket values should be accumulated. If set to false, "gt" tag will be added.
   ## Defaults to true.
   cumulative = true
+
+  ## Expiration interval for each histogram. The histogram will be expired if 
+  ## there are no changes in any buckets for this time interval. 0 == no expiration.
+  ## Defaults to 0.
+  expiration_interval = "5m"
 
   ## Example config that aggregates all fields of the metric.
   # [[aggregators.histogram.config]]
@@ -119,6 +132,12 @@ func (h *HistogramAggregator) Description() string {
 
 // Add adds new hit to the buckets
 func (h *HistogramAggregator) Add(in telegraf.Metric) {
+	addTime := time.Time{}
+
+	if h.ExpirationInterval != 0 {
+		addTime = h.timeFun()
+	}
+
 	bucketsByField := make(map[string][]float64)
 	for field := range in.Fields() {
 		buckets := h.getBuckets(in.Name(), field)
@@ -151,6 +170,9 @@ func (h *HistogramAggregator) Add(in telegraf.Metric) {
 				index := sort.SearchFloat64s(buckets, value)
 				agr.histogramCollection[field][index]++
 			}
+			if !addTime.IsZero() {
+				agr.lastUpdateTime = addTime
+			}
 		}
 	}
 
@@ -160,8 +182,17 @@ func (h *HistogramAggregator) Add(in telegraf.Metric) {
 // Push returns histogram values for metrics
 func (h *HistogramAggregator) Push(acc telegraf.Accumulator) {
 	metricsWithGroupedFields := []groupedByCountFields{}
+	expireTime := time.Time{}
 
-	for _, aggregate := range h.cache {
+	if h.ExpirationInterval != 0 {
+		expireTime = h.timeFun().Add(-time.Duration(h.ExpirationInterval))
+	}
+
+	for id, aggregate := range h.cache {
+		if !expireTime.IsZero() && aggregate.lastUpdateTime.Before(expireTime) {
+			delete(h.cache, id)
+			continue
+		}
 		for field, counts := range aggregate.histogramCollection {
 			h.groupFieldsByBuckets(&metricsWithGroupedFields, aggregate.name, field, copyTags(aggregate.tags), counts)
 		}
