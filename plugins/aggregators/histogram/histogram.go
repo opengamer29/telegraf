@@ -29,7 +29,6 @@ type HistogramAggregator struct {
 	Cumulative         bool                    `toml:"cumulative"`
 	ExpirationInterval telegrafConfig.Duration `toml:"expiration_interval"`
 
-	timeFun timeFunc
 	buckets bucketsByMetrics
 	cache   map[uint64]metricHistogramCollection
 }
@@ -57,7 +56,7 @@ type metricHistogramCollection struct {
 	histogramCollection map[string]counts
 	name                string
 	tags                map[string]string
-	lastUpdateTime      time.Time
+	expireTime          time.Time
 }
 
 // counts is the number of hits in the bucket
@@ -70,11 +69,12 @@ type groupedByCountFields struct {
 	fieldsWithCount map[string]int64
 }
 
+var timeNow timeFunc
+
 // NewHistogramAggregator creates new histogram aggregator
 func NewHistogramAggregator() *HistogramAggregator {
 	h := &HistogramAggregator{
 		Cumulative: true,
-		timeFun:    time.Now,
 	}
 	h.buckets = make(bucketsByMetrics)
 	h.resetCache()
@@ -135,7 +135,7 @@ func (h *HistogramAggregator) Add(in telegraf.Metric) {
 	addTime := time.Time{}
 
 	if h.ExpirationInterval != 0 {
-		addTime = h.timeFun()
+		addTime = timeNow()
 	}
 
 	bucketsByField := make(map[string][]float64)
@@ -171,7 +171,7 @@ func (h *HistogramAggregator) Add(in telegraf.Metric) {
 				agr.histogramCollection[field][index]++
 			}
 			if !addTime.IsZero() {
-				agr.lastUpdateTime = addTime
+				agr.expireTime = addTime.Add(time.Duration(h.ExpirationInterval))
 			}
 		}
 	}
@@ -182,14 +182,14 @@ func (h *HistogramAggregator) Add(in telegraf.Metric) {
 // Push returns histogram values for metrics
 func (h *HistogramAggregator) Push(acc telegraf.Accumulator) {
 	metricsWithGroupedFields := []groupedByCountFields{}
-	expireTime := time.Time{}
+	now := time.Time{}
 
 	if h.ExpirationInterval != 0 {
-		expireTime = h.timeFun().Add(-time.Duration(h.ExpirationInterval))
+		now = timeNow()
 	}
 
 	for id, aggregate := range h.cache {
-		if !expireTime.IsZero() && aggregate.lastUpdateTime.Before(expireTime) {
+		if !now.IsZero() && now.After(aggregate.expireTime) {
 			delete(h.cache, id)
 			continue
 		}
@@ -376,4 +376,5 @@ func init() {
 	aggregators.Add("histogram", func() telegraf.Aggregator {
 		return NewHistogramAggregator()
 	})
+	timeNow = time.Now
 }

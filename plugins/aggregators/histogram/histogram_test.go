@@ -18,16 +18,15 @@ type tags map[string]string
 
 // NewTestHistogram creates new test histogram aggregation with specified config
 func NewTestHistogram(cfg []config, reset bool, cumulative bool) telegraf.Aggregator {
-	return NewTestHistogramWithExpirationInterval(cfg, reset, cumulative, 0, time.Now)
+	return NewTestHistogramWithExpirationInterval(cfg, reset, cumulative, 0)
 }
 
-func NewTestHistogramWithExpirationInterval(cfg []config, reset bool, cumulative bool, expirationInterval telegrafConfig.Duration, timeFunc timeFunc) telegraf.Aggregator {
+func NewTestHistogramWithExpirationInterval(cfg []config, reset bool, cumulative bool, expirationInterval telegrafConfig.Duration) telegraf.Aggregator {
 	htm := NewHistogramAggregator()
 	htm.Configs = cfg
 	htm.ResetBuckets = reset
 	htm.Cumulative = cumulative
 	htm.ExpirationInterval = expirationInterval
-	htm.timeFun = timeFunc
 
 	return htm
 }
@@ -254,14 +253,17 @@ func TestWrongBucketsOrder(t *testing.T) {
 // TestHistogram tests two metrics getting added and metric expiration
 func TestHistogramMetricExpiration(t *testing.T) {
 	currentTime := time.Unix(10, 0)
-	timeFunc := func() time.Time {
+	timeNow = func() time.Time {
 		return currentTime
 	}
+	defer func() {
+		timeNow = time.Now
+	}()
 
 	var cfg []config
 	cfg = append(cfg, config{Metric: "first_metric_name", Fields: []string{"a"}, Buckets: []float64{0.0, 10.0, 20.0, 30.0, 40.0}})
 	cfg = append(cfg, config{Metric: "second_metric_name", Buckets: []float64{0.0, 4.0, 10.0, 23.0, 30.0}})
-	histogram := NewTestHistogramWithExpirationInterval(cfg, false, true, telegrafConfig.Duration(30), timeFunc)
+	histogram := NewTestHistogramWithExpirationInterval(cfg, false, true, telegrafConfig.Duration(30))
 
 	acc := &testutil.Accumulator{}
 
