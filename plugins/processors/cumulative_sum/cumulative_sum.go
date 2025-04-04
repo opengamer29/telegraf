@@ -11,14 +11,13 @@ import (
 var sampleConfig string
 
 type CumulativeSum struct {
-	Log          telegraf.Logger
-	Fields       []string `toml:"fields"`
-	DropOriginal bool     `toml:"drop_original"`
+	Log               telegraf.Logger
+	Fields            []string `toml:"fields"`
+	DropOriginalField bool     `toml:"drop_original_field"`
 
 	fields map[string]bool
 
 	// TODO: do we need to clear old caches?
-	// TODO: does processor's Apply call concurrently? if so we need to use atomic in cache
 	cache map[uint64]aggregate
 }
 
@@ -26,6 +25,13 @@ type aggregate struct {
 	name   string
 	tags   map[string]string
 	fields map[string]float64
+}
+
+func NewCumulativeSum() *CumulativeSum {
+	return &CumulativeSum{
+		DropOriginalField: true,
+		cache:             make(map[uint64]aggregate),
+	}
 }
 
 func (*CumulativeSum) SampleConfig() string {
@@ -50,11 +56,12 @@ func (c *CumulativeSum) Apply(in ...telegraf.Metric) []telegraf.Metric {
 				if fv, ok := convert(field.Value); ok {
 					a.fields[field.Key] = fv
 					original.AddField(field.Key+"_sum", fv)
-					if c.DropOriginal {
+					if c.DropOriginalField {
 						original.RemoveField(field.Key)
 					}
 				}
 			}
+			c.cache[id] = a
 		} else {
 			for _, field := range original.FieldList() {
 				if c.fields != nil {
@@ -70,14 +77,20 @@ func (c *CumulativeSum) Apply(in ...telegraf.Metric) []telegraf.Metric {
 						c.cache[id].fields[field.Key] = c.cache[id].fields[field.Key] + fv
 					}
 					original.AddField(field.Key+"_sum", c.cache[id].fields[field.Key])
-					if c.DropOriginal {
+					if c.DropOriginalField {
 						original.RemoveField(field.Key)
 					}
 				}
 			}
 		}
 	}
+	c.cleanup()
 	return in
+}
+
+// Remove expired items from cache
+func (c *CumulativeSum) cleanup() {
+	// TODO: copy from dedup + histograms
 }
 
 func convert(in interface{}) (float64, bool) {
@@ -105,8 +118,6 @@ func (c *CumulativeSum) Init() error {
 
 func init() {
 	processors.Add("cumulative_sum", func() telegraf.Processor {
-		return &CumulativeSum{
-			DropOriginal: true,
-		}
+		return NewCumulativeSum()
 	})
 }
