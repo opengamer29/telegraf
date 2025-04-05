@@ -1,4 +1,4 @@
-//go:build !custom || processors || processors.lookup
+//go:build !custom || processors || processors.cumulative_sum
 
 package all
 

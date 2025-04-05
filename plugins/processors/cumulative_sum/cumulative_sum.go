@@ -3,10 +3,11 @@ package cumulative_sum
 
 import (
 	_ "embed"
+	"time"
+
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/plugins/processors"
-	"time"
 )
 
 //go:embed sample.conf
@@ -18,8 +19,7 @@ type CumulativeSum struct {
 	DropOriginalField bool            `toml:"drop_original_field"`
 	CleanUpInterval   config.Duration `toml:"clean_up_interval"`
 
-	fields map[string]bool
-	// TODO: does processor's Apply call concurrently? if so we need to use atomic in cache
+	fieldMap    map[string]bool
 	cache       map[uint64]aggregate
 	nextCleanUp time.Time
 }
@@ -57,8 +57,8 @@ func (c *CumulativeSum) Apply(in ...telegraf.Metric) []telegraf.Metric {
 				expireTime: timeNow().Add(time.Duration(c.CleanUpInterval)),
 			}
 			for _, field := range original.FieldList() {
-				if c.fields != nil {
-					if _, ok := c.fields[field.Key]; !ok {
+				if c.fieldMap != nil {
+					if _, ok := c.fieldMap[field.Key]; !ok {
 						continue
 					}
 				}
@@ -73,8 +73,8 @@ func (c *CumulativeSum) Apply(in ...telegraf.Metric) []telegraf.Metric {
 			c.cache[id] = a
 		} else {
 			for _, field := range original.FieldList() {
-				if c.fields != nil {
-					if _, ok := c.fields[field.Key]; !ok {
+				if c.fieldMap != nil {
+					if _, ok := c.fieldMap[field.Key]; !ok {
 						continue
 					}
 				}
@@ -131,9 +131,9 @@ func convert(in interface{}) (float64, bool) {
 func (c *CumulativeSum) Init() error {
 	c.nextCleanUp = timeNow().Add(time.Duration(c.CleanUpInterval))
 	if c.Fields != nil {
-		c.fields = make(map[string]bool, len(c.Fields))
+		c.fieldMap = make(map[string]bool, len(c.Fields))
 		for _, field := range c.Fields {
-			c.fields[field] = true
+			c.fieldMap[field] = true
 		}
 	}
 	return nil

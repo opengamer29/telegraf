@@ -1,12 +1,14 @@
 package cumulative_sum
 
 import (
-	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/config"
-	"github.com/influxdata/telegraf/metric"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -28,7 +30,7 @@ func TestCumulativeSum(t *testing.T) {
 	}
 
 	plugin := NewCumulativeSum()
-	plugin.Init()
+	require.NoError(t, plugin.Init())
 
 	actual := plugin.Apply(
 		metric.New(
@@ -64,7 +66,7 @@ func TestCumulativeSumDropOriginalFalse(t *testing.T) {
 
 	plugin := NewCumulativeSum()
 	plugin.DropOriginalField = false
-	plugin.Init()
+	require.NoError(t, plugin.Init())
 
 	actual := plugin.Apply(
 		metric.New(
@@ -99,7 +101,7 @@ func TestCumulativeSumStringField(t *testing.T) {
 	}
 
 	plugin := NewCumulativeSum()
-	plugin.Init()
+	require.NoError(t, plugin.Init())
 
 	actual := plugin.Apply(
 		metric.New(
@@ -135,7 +137,7 @@ func TestCumulativeFieldFilteredOut(t *testing.T) {
 
 	plugin := NewCumulativeSum()
 	plugin.Fields = []string{"another_name"}
-	plugin.Init()
+	require.NoError(t, plugin.Init())
 
 	// same as expected
 	actual := plugin.Apply(
@@ -173,7 +175,7 @@ func TestCumulativeFieldMatch(t *testing.T) {
 
 	plugin := NewCumulativeSum()
 	plugin.Fields = []string{"value"}
-	plugin.Init()
+	require.NoError(t, plugin.Init())
 
 	actual := plugin.Apply(
 		metric.New(
@@ -204,7 +206,7 @@ func TestCumulativeSumCleanedAccumulatorAfterCleanupInterval(t *testing.T) {
 
 	plugin := NewCumulativeSum()
 	plugin.CleanUpInterval = config.Duration(60 * time.Second)
-	plugin.Init()
+	require.NoError(t, plugin.Init())
 
 	plugin.Apply(
 		metric.New(
