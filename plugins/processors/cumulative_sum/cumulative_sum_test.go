@@ -2,6 +2,7 @@ package cumulative_sum
 
 import (
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/metric"
 	"testing"
 	"time"
@@ -187,5 +188,78 @@ func TestCumulativeFieldMatch(t *testing.T) {
 			map[string]interface{}{"value_name": "name", "value_sum": float64(4)},
 			time.Unix(0, 0),
 		))
+	testutil.RequireMetricsEqual(t, expected, actual)
+}
+
+// TestCumulativeSum clean up internal interval for metric fields that wasn't updated too long
+func TestCumulativeSumCleanedAccumulatorAfterCleanupInterval(t *testing.T) {
+	currentTime := time.Unix(5, 0)
+
+	timeNow = func() time.Time {
+		return currentTime
+	}
+	t.Cleanup(func() {
+		timeNow = time.Now
+	})
+
+	plugin := NewCumulativeSum()
+	plugin.CleanUpInterval = config.Duration(60 * time.Second)
+	plugin.Init()
+
+	plugin.Apply(
+		metric.New(
+			"m1",
+			map[string]string{"metric_tag": "from_metric"},
+			map[string]interface{}{"value": 1},
+			time.Unix(0, 0),
+		), metric.New(
+			"m2",
+			map[string]string{"metric_tag": "from_metric"},
+			map[string]interface{}{"value": 7},
+			time.Unix(0, 0),
+		))
+
+	currentTime = time.Unix(30, 0)
+
+	plugin.Apply(
+		metric.New(
+			"m1",
+			map[string]string{"metric_tag": "from_metric"},
+			map[string]interface{}{"value": 1},
+			time.Unix(0, 0),
+		))
+
+	currentTime = time.Unix(70, 0)
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"m1",
+			map[string]string{"metric_tag": "from_metric"},
+			map[string]interface{}{"value_sum": float64(3)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"m2",
+			map[string]string{"metric_tag": "from_metric"},
+			map[string]interface{}{"value_sum": float64(7)},
+			time.Unix(0, 0),
+		),
+	}
+
+	actual := plugin.Apply(
+		metric.New(
+			"m1",
+			map[string]string{"metric_tag": "from_metric"},
+			map[string]interface{}{"value": 1},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"m2",
+			map[string]string{"metric_tag": "from_metric"},
+			map[string]interface{}{"value": 7},
+			time.Unix(0, 0),
+		),
+	)
+
 	testutil.RequireMetricsEqual(t, expected, actual)
 }
